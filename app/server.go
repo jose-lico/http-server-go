@@ -25,14 +25,24 @@ func main() {
 	req := make([]byte, 1024)
 	conn.Read(req)
 	req_str := string(req)
-	path := strings.Split(req_str, " ")[1]
+	req_slice := strings.Split(req_str, "\r\n")
+
+	// method := strings.Split(req_slice[0], " ")[0]
+	path := strings.Split(req_slice[0], " ")[1]
+	version := strings.Split(req_slice[0], " ")[2]
+
+	if version != "HTTP/1.1" {
+		conn.Write([]byte("HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n"))
+	}
 
 	if path == "/" {
 		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+	} else if path == "/user-agent" {
+		ua := strings.Split(req_slice[2], " ")[1]
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(ua), ua)))
 	} else if strings.Split(path, "/")[1] == "echo" {
 		message := strings.Split(path, "/")[2]
 		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(message), message)))
-
 	} else {
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 	}
