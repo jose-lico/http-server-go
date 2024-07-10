@@ -37,16 +37,27 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
-	req_str := string(req[:n])
-	if req_str == "" {
+	reqStr := string(req[:n])
+	if reqStr == "" {
 		return
 	}
 
-	req_slice := strings.Split(req_str, "\r\n")
+	reqSlice := strings.Split(reqStr, "\r\n\r\n")
 
-	method := strings.Split(req_slice[0], " ")[0]
-	path := strings.Split(req_slice[0], " ")[1]
-	version := strings.Split(req_slice[0], " ")[2]
+	reqLineAndHeaders := strings.Split(reqSlice[0], "\r\n")
+
+	reqLine := strings.Split(reqLineAndHeaders[0], " ")
+	headers := make(map[string]string)
+	body := reqSlice[1]
+
+	for i := 1; i < len(reqLineAndHeaders); i++ {
+		header := strings.Split(reqLineAndHeaders[i], ": ")
+		headers[header[0]] = header[1]
+	}
+
+	method := reqLine[0]
+	path := reqLine[1]
+	version := reqLine[2]
 
 	if version != "HTTP/1.1" {
 		conn.Write([]byte("HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n"))
@@ -57,8 +68,8 @@ func handleConnection(conn net.Conn) {
 		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 		return
 	} else if path == "/user-agent" {
-		ua := strings.Split(req_slice[2], " ")[1]
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(ua), ua)))
+
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(headers["User-Agent"]), headers["User-Agent"])))
 		return
 	} else if strings.Split(path, "/")[1] == "files" {
 		fileName := strings.Split(path, "/")[2]
@@ -90,8 +101,7 @@ func handleConnection(conn net.Conn) {
 				return
 			}
 		} else if method == "POST" {
-			content := []byte(req_slice[len(req_slice)-1])
-			err := os.WriteFile(filePath, content, 0644)
+			err := os.WriteFile(filePath, []byte(body), 0644)
 
 			conn.Write([]byte("HTTP/1.1 201 Created\r\n\r\n"))
 			if err != nil {
@@ -105,7 +115,11 @@ func handleConnection(conn net.Conn) {
 
 	} else if strings.Split(path, "/")[1] == "echo" {
 		message := strings.Split(path, "/")[2]
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(message), message)))
+		if headers["Accept-Encoding"] == "gzip" {
+			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s", len(message), message)))
+		} else {
+			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(message), message)))
+		}
 		return
 	} else {
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
