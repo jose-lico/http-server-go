@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -28,6 +29,7 @@ func main() {
 }
 
 func handleConnection(conn net.Conn) {
+	defer conn.Close()
 	req := make([]byte, 1024)
 	n, err := conn.Read(req)
 	if err != nil {
@@ -48,17 +50,50 @@ func handleConnection(conn net.Conn) {
 
 	if version != "HTTP/1.1" {
 		conn.Write([]byte("HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n"))
+		return
 	}
 
 	if path == "/" {
 		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+		return
 	} else if path == "/user-agent" {
 		ua := strings.Split(req_slice[2], " ")[1]
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(ua), ua)))
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s\r\n\r\n", len(ua), ua)))
+		return
+	} else if strings.Split(path, "/")[1] == "files" {
+		fileName := strings.Split(path, "/")[2]
+		dir := os.Args[2]
+
+		filePath := dir + fileName
+
+		if _, err := os.Stat(filePath); err == nil {
+			file, err := os.Open(filePath)
+			if err != nil {
+				conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n"))
+				return
+			}
+			defer file.Close()
+
+			data, err := io.ReadAll(file)
+			if err != nil {
+				conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n"))
+				return
+			}
+
+			fileContent := string(data)
+
+			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s\r\n\r\n", len(fileContent), fileContent)))
+			return
+		} else {
+			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+			return
+		}
 	} else if strings.Split(path, "/")[1] == "echo" {
 		message := strings.Split(path, "/")[2]
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(message), message)))
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s\r\n\r\n", len(message), message)))
+		return
 	} else {
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+		return
 	}
 }
