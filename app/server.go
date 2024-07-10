@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -51,7 +52,7 @@ func handleConnection(conn net.Conn) {
 	body := reqSlice[1]
 
 	for i := 1; i < len(reqLineAndHeaders); i++ {
-		header := strings.Split(reqLineAndHeaders[i], ": ")
+		header := strings.SplitN(reqLineAndHeaders[i], ": ", 2)
 		headers[header[0]] = header[1]
 	}
 
@@ -115,7 +116,9 @@ func handleConnection(conn net.Conn) {
 
 	} else if strings.Split(path, "/")[1] == "echo" {
 		message := strings.Split(path, "/")[2]
-		if headers["Accept-Encoding"] == "gzip" {
+		encodings := strings.Split(headers["Accept-Encoding"], ", ")
+		exists := slices.Contains(encodings, "gzip")
+		if exists {
 			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s", len(message), message)))
 		} else {
 			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(message), message)))
