@@ -16,15 +16,30 @@ func main() {
 		os.Exit(1)
 	}
 
-	conn, err := l.Accept()
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			os.Exit(1)
+		}
+
+		go handleConnection(conn)
+	}
+}
+
+func handleConnection(conn net.Conn) {
+	req := make([]byte, 1024)
+	n, err := conn.Read(req)
 	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
+		fmt.Println("Error reading from connection:", err)
+		return
 	}
 
-	req := make([]byte, 1024)
-	conn.Read(req)
-	req_str := string(req)
+	req_str := string(req[:n])
+	if req_str == "" {
+		return
+	}
+
 	req_slice := strings.Split(req_str, "\r\n")
 
 	// method := strings.Split(req_slice[0], " ")[0]
