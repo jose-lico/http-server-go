@@ -27,7 +27,7 @@ func main() {
 	req_str := string(req)
 	path := strings.Split(req_str, " ")[1]
 
-	if path == "" {
+	if path == "/" {
 		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 	} else if strings.Split(path, "/")[1] == "echo" {
 		message := strings.Split(path, "/")[2]
