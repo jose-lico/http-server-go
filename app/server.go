@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net"
@@ -119,7 +121,11 @@ func handleConnection(conn net.Conn) {
 		encodings := strings.Split(headers["Accept-Encoding"], ", ")
 		exists := slices.Contains(encodings, "gzip")
 		if exists {
-			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s", len(message), message)))
+			compressed, err := compressString(message)
+			if err != nil {
+				conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n"))
+			}
+			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s", len(compressed), compressed)))
 		} else {
 			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(message), message)))
 		}
@@ -128,4 +134,21 @@ func handleConnection(conn net.Conn) {
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 		return
 	}
+}
+
+func compressString(s string) ([]byte, error) {
+	var b bytes.Buffer
+	w := gzip.NewWriter(&b)
+
+	_, err := w.Write([]byte(s))
+	if err != nil {
+		return nil, err
+	}
+
+	err = w.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
 }
