@@ -10,15 +10,13 @@ import (
 func main() {
 	s := server.NewServer()
 	s.Get("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "Hello, world!")
+		fmt.Fprint(w, "Hello, world!")
+	}))
+
+	s.Post("/create", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, "Created an object!")
 	}))
 
 	s.ListenAndServe("localhost:8000")
-
-	// mux := http.NewServeMux()
-	// mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	// 	fmt.Fprintln(w, "Hello, world!")
-	// }))
-
-	// http.ListenAndServe("localhost:8000", mux)
 }

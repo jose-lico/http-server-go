@@ -119,5 +119,5 @@ func (s *Server) handleConnection(conn net.Conn) {
 	writer := NewWriter()
 
 	s.handlers[fmt.Sprintf("%s %s", reqLine[0], reqLine[1])].ServeHTTP(writer, request)
-	conn.Write([]byte(fmt.Sprintf("%s 200 OK\r\n\r\n%s", protocol, writer.body.String())))
+	conn.Write([]byte(fmt.Sprintf("%s %d %s\r\n\r\n%s", protocol, writer.status, http.StatusText(writer.status), writer.body.String())))
 }
