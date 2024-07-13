@@ -1,11 +1,13 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Handler interface {
@@ -101,23 +103,47 @@ func (s *Server) handleConnection(conn net.Conn) {
 		return
 	}
 
-	// Create header structure TODO: Should be map[string][]string
-	// h := make(map[string][]string)
-	// for i := 1; i < len(reqLineAndHeaders); i++ {
-	// 	header := strings.SplitN(reqLineAndHeaders[i], ": ", 2)
-	// 	h[header[0]] = header[1]
-	// }
-
-	body := []byte(reqSlice[1])
-	request, err := http.NewRequest(method, uri, bytes.NewBuffer(body))
+	var body io.Reader
+	if len(reqSlice) > 1 {
+		body = strings.NewReader(reqSlice[1])
+	}
+	request, err := http.NewRequest(method, uri, body)
 
 	if err != nil {
 		conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n"))
 		return
 	}
 
-	writer := NewWriter()
+	for i := 1; i < len(reqLineAndHeaders); i++ {
+		header := strings.SplitN(reqLineAndHeaders[i], ":", 2)
+		if len(header) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(header[0])
+		values := strings.Split(strings.TrimSpace(header[1]), ", ")
+		for _, value := range values {
+			request.Header.Add(key, strings.TrimSpace(value))
+		}
+	}
 
+	writer := NewWriter()
 	s.handlers[fmt.Sprintf("%s %s", reqLine[0], reqLine[1])].ServeHTTP(writer, request)
+
+	// Set Status if not set
+	if writer.status == 0 {
+		writer.status = http.StatusOK
+	}
+
+	// Set Content-Type if not set
+	if writer.Header().Get("Content-Type") == "" {
+		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
+
+	// Set Content-Length
+	writer.Header().Set("Content-Length", strconv.Itoa(writer.body.Len()))
+
+	// Set Date
+	writer.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
+
 	conn.Write([]byte(fmt.Sprintf("%s %d %s\r\n\r\n%s", protocol, writer.status, http.StatusText(writer.status), writer.body.String())))
 }
