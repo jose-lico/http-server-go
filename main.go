@@ -9,6 +9,7 @@ import (
 
 func main() {
 	s := server.NewServer()
+
 	// curl -v http://localhost:8000
 	s.Get("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Hello world!")
@@ -31,6 +32,4 @@ func main() {
 
 	fmt.Println("Starting server on port 8000")
 	s.ListenAndServe("localhost:8000")
-
-	http.NewServeMux()
 }

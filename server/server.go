@@ -27,15 +27,18 @@ func NewServer() *Server {
 }
 
 func (s *Server) Get(p string, h http.Handler) {
-	// TODO: check if method is already allowed on path
-	s.uriMethodsMap[p] = append(s.uriMethodsMap[p], "GET")
-	s.handlers[fmt.Sprintf("GET %s", p)] = h
+	s.uriMethodsMap[p] = append(s.uriMethodsMap[p], http.MethodGet)
+	s.handlers[fmt.Sprintf("%s %s", http.MethodGet, p)] = h
 }
 
 func (s *Server) Post(p string, h http.Handler) {
-	// TODO: check if method is already allowed on path
-	s.uriMethodsMap[p] = append(s.uriMethodsMap[p], "POST")
-	s.handlers[fmt.Sprintf("POST %s", p)] = h
+	s.uriMethodsMap[p] = append(s.uriMethodsMap[p], http.MethodPost)
+	s.handlers[fmt.Sprintf("%s %s", http.MethodPost, p)] = h
+}
+
+func (s *Server) Delete(p string, h http.Handler) {
+	s.uriMethodsMap[p] = append(s.uriMethodsMap[p], http.MethodDelete)
+	s.handlers[fmt.Sprintf("%s %s", http.MethodDelete, p)] = h
 }
 
 func (s *Server) ListenAndServe(addr string) error {
@@ -58,7 +61,7 @@ func (s *Server) ListenAndServe(addr string) error {
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	// If the request is to large, return 403 TODO: Find better way to handle this
+	// If the request is to large, return 413 TODO: Find better way to handle this
 	req := make([]byte, 1024)
 	n, err := conn.Read(req)
 	if err != nil {
