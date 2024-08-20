@@ -40,6 +40,7 @@ func (s *Server) Post(p string, h http.Handler) {
 
 func (s *Server) ListenAndServe(addr string) error {
 	l, err := net.Listen("tcp", addr)
+
 	if err != nil {
 		return err
 	}
@@ -145,5 +146,16 @@ func (s *Server) handleConnection(conn net.Conn) {
 	// Set Date
 	writer.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
 
-	conn.Write([]byte(fmt.Sprintf("%s %d %s\r\n\r\n%s", protocol, writer.status, http.StatusText(writer.status), writer.body.String())))
+	// Set Connection, for now always close
+	writer.Header().Set("Connection", "close")
+
+	var headerStr string
+
+	for key, values := range writer.Header() {
+		for _, value := range values {
+			headerStr = headerStr + fmt.Sprintf("%s: %s\r\n", key, value)
+		}
+	}
+
+	conn.Write([]byte(fmt.Sprintf("%s %d %s\r\n%s\r\n%s", protocol, writer.status, http.StatusText(writer.status), headerStr, writer.body.String())))
 }
