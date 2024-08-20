@@ -16,8 +16,17 @@ func main() {
 
 	// curl -v -X POST http://localhost:8000/create -d "name=Joe&last_name=Mama"
 	s.Post("/create", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		err := r.ParseForm()
+		if err != nil {
+			http.Error(w, "Unable to parse form", http.StatusBadRequest)
+			return
+		}
+
+		name := r.FormValue("name")
+		lastName := r.FormValue("last_name")
+
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprint(w, "Created an object!")
+		fmt.Fprintf(w, "Created user %s %s\n", name, lastName)
 	}))
 
 	fmt.Println("Starting server on port 8000")
