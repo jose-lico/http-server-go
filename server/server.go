@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -82,8 +83,6 @@ func (s *Server) handleConnection(conn net.Conn) {
 	// Split Method, URI and Version
 	reqLine := strings.Split(reqLineAndHeaders[0], " ")
 
-	method := reqLine[0]
-	uri := reqLine[1]
 	protocol := reqLine[2]
 
 	// Only support protocol version HTTP/1.1, return 505 otherwise
@@ -92,7 +91,15 @@ func (s *Server) handleConnection(conn net.Conn) {
 		return
 	}
 
-	val, ok := s.uriMethodsMap[uri]
+	method := reqLine[0]
+	uri, err := url.Parse(reqLine[1])
+
+	if err != nil {
+		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+		return
+	}
+
+	val, ok := s.uriMethodsMap[uri.Path]
 
 	if ok {
 		// If the URI exists but the method is not allowed, return a 405
@@ -111,12 +118,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 	if len(reqSlice) > 1 {
 		body = strings.NewReader(reqSlice[1])
 	}
-	request, err := http.NewRequest(method, uri, body)
+	request, err := http.NewRequest(method, uri.Path, body)
 
 	if err != nil {
 		conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n"))
 		return
 	}
+
+	request.URL = uri
 
 	for i := 1; i < len(reqLineAndHeaders); i++ {
 		header := strings.SplitN(reqLineAndHeaders[i], ":", 2)
@@ -131,7 +140,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 
 	writer := NewWriter()
-	s.handlers[fmt.Sprintf("%s %s", reqLine[0], reqLine[1])].ServeHTTP(writer, request)
+	s.handlers[fmt.Sprintf("%s %s", method, request.URL.Path)].ServeHTTP(writer, request)
 
 	// Set Status if not set
 	if writer.status == 0 {
