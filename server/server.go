@@ -15,31 +15,30 @@ type Handler interface {
 	ServeHTTP(http.ResponseWriter, *http.Request)
 }
 
+type Route struct {
+	Pattern   []string
+	Wildcards []string
+	Handlers  map[string]http.Handler
+}
+
 type Server struct {
-	handlers      map[string]http.Handler
-	uriMethodsMap map[string][]string
+	routes []Route
 }
 
 func NewServer() *Server {
-	return &Server{
-		handlers:      make(map[string]http.Handler),
-		uriMethodsMap: make(map[string][]string),
-	}
+	return &Server{}
 }
 
 func (s *Server) Get(p string, h http.Handler) {
-	s.uriMethodsMap[p] = append(s.uriMethodsMap[p], http.MethodGet)
-	s.handlers[fmt.Sprintf("%s %s", http.MethodGet, p)] = h
+	s.addRoute(http.MethodGet, p, h)
 }
 
 func (s *Server) Post(p string, h http.Handler) {
-	s.uriMethodsMap[p] = append(s.uriMethodsMap[p], http.MethodPost)
-	s.handlers[fmt.Sprintf("%s %s", http.MethodPost, p)] = h
+	s.addRoute(http.MethodPost, p, h)
 }
 
 func (s *Server) Delete(p string, h http.Handler) {
-	s.uriMethodsMap[p] = append(s.uriMethodsMap[p], http.MethodDelete)
-	s.handlers[fmt.Sprintf("%s %s", http.MethodDelete, p)] = h
+	s.addRoute(http.MethodDelete, p, h)
 }
 
 func (s *Server) ListenAndServe(addr string) error {
@@ -57,6 +56,94 @@ func (s *Server) ListenAndServe(addr string) error {
 
 		go s.handleConnection(conn)
 	}
+}
+
+func (s *Server) addRoute(method, pattern string, handler http.Handler) {
+	parts := strings.Split(pattern, "/")[1:]
+
+	var wildcards []string
+
+	for i, part := range parts {
+		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
+			wildcards = append(wildcards, part[1:len(part)-1])
+			parts[i] = ""
+		}
+	}
+
+	for _, route := range s.routes {
+		if len(parts) != len(route.Pattern) {
+			continue
+		}
+
+		match := true
+
+		for i, part := range route.Pattern {
+			if part != parts[i] {
+				match = false
+				break
+			}
+		}
+
+		if match {
+			route.Handlers[method] = handler
+			return
+		}
+	}
+
+	route := Route{
+		Pattern:   parts,
+		Wildcards: wildcards,
+		Handlers:  make(map[string]http.Handler),
+	}
+
+	route.Handlers[method] = handler
+
+	s.routes = append(s.routes, route)
+}
+
+func (s *Server) match(method, path string) (http.Handler, map[string]string, bool, bool) {
+	parts := strings.Split(path, "/")[1:]
+
+	for _, route := range s.routes {
+		if len(parts) != len(route.Pattern) {
+			continue
+		}
+
+		wildcards := make(map[string]string)
+		match := true
+
+		// Check pattern
+		for i, part := range route.Pattern {
+			if part == "" {
+				// temp fix for index route edge case
+				if len(route.Wildcards) == 0 {
+					if part != parts[i] {
+						match = false
+					}
+
+					break
+				}
+
+				wildcards[route.Wildcards[len(wildcards)]] = parts[i]
+			} else if part != parts[i] {
+				match = false
+				break
+			}
+		}
+
+		// Check method
+		if match {
+			handler, exists := route.Handlers[method]
+
+			if exists {
+				return handler, wildcards, true, true
+			} else {
+				return handler, wildcards, true, false
+			}
+		}
+	}
+
+	return nil, nil, false, false
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
@@ -99,18 +186,15 @@ func (s *Server) handleConnection(conn net.Conn) {
 		return
 	}
 
-	val, ok := s.uriMethodsMap[uri.Path]
+	handler, wildcards, found, correctMethod := s.match(method, uri.Path)
 
-	if ok {
-		// If the URI exists but the method is not allowed, return a 405
-		if !contains(val, method) {
-			conn.Write([]byte("HTTP/1.1 405 Method Not Allowed\r\n\r\n"))
-			return
-		}
-
-	} else {
-		// If the URI does not exist, return a 404
+	if !found {
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+		return
+	}
+
+	if !correctMethod {
+		conn.Write([]byte("HTTP/1.1 405 Method Not Allowed\r\n\r\n"))
 		return
 	}
 
@@ -119,6 +203,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 		body = strings.NewReader(reqSlice[1])
 	}
 	request, err := http.NewRequest(method, uri.Path, body)
+
+	for wildcard, value := range wildcards {
+		request.SetPathValue(wildcard, value)
+	}
 
 	if err != nil {
 		conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n"))
@@ -140,7 +228,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 
 	writer := NewWriter()
-	s.handlers[fmt.Sprintf("%s %s", method, request.URL.Path)].ServeHTTP(writer, request)
+	handler.ServeHTTP(writer, request)
 
 	// Set Status if not set
 	if writer.status == 0 {
