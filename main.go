@@ -2,18 +2,36 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/jose-lico/http-server-go/server"
 )
 
+// curl requests to test server and enpoints
+
+// Error states
+
+// Send a large header to trigger a `431 Request Header Fields Too Large` status
+// curl -v http://localhost:8000/ -H "X-Large-Header: $(head -c 1500 </dev/urandom | base64)" -d "This is a test body"
+
+// Send a large body to trigger a `413 Payload Too Large` status
+// curl -v --data-binary "$(head -c 3000 </dev/urandom | base64)" "http://localhost:8000"
+
+// Requests with handlers
+
+// curl -v "http://localhost:8000"
+// curl -v "http://localhost:8000/?name=Joe&pets=Turtle&pets=Dog"
+// curl -v "http://localhost:8000/echo/ligma"
+// curl -v "http://localhost:8000/echo/Hello/reverse/World"
+// curl -v "http://localhost:8000/123"
+// curl -v "http://localhost:8000/321"
+// curl -v -X POST "http://localhost:8000"
+// curl -v -X POST "http://localhost:8000/create" -d "name=Joe&last_name=Mama"
+
 func main() {
 	s := server.NewServer()
 
-	// Query params
-
-	// curl -v "http://localhost:8000"
-	// curl -v "http://localhost:8000/?name=Joe&pets=Turtle&pets=Dog"
 	s.Get("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for key, values := range r.URL.Query() {
 			fmt.Printf("Key: %s	| Value(s): %v\n", key, values)
@@ -22,16 +40,12 @@ func main() {
 		fmt.Fprintln(w, "Hello world!")
 	}))
 
-	// Support for wildcards
-
-	// curl -v "http://localhost:8000/echo/ligma"
 	s.Get("/echo/{echo}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		echo := r.PathValue("echo")
 
 		fmt.Fprintln(w, echo)
 	}))
 
-	// curl -v "http://localhost:8000/echo/Hello/reverse/World"
 	s.Get("/echo/{echo}/reverse/{echo2}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reverseString := func(s string) string {
 			runes := []rune(s)
@@ -47,10 +61,6 @@ func main() {
 		fmt.Fprintln(w, echo, echo2)
 	}))
 
-	// TODO: Support wildcard as initial part of URL
-
-	// curl -v "http://localhost:8000/123"
-	// curl -v "http://localhost:8000/321"
 	// s.Get("/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 	// 	id := r.PathValue("id")
 
@@ -66,12 +76,18 @@ func main() {
 
 	// Same route, different method
 
-	// curl -v -X POST "http://localhost:8000"
 	s.Post("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "Hello world from a post!")
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Unable to read body", http.StatusBadRequest)
+			return
+		}
+
+		defer r.Body.Close()
+
+		fmt.Fprintf(w, "Hello world from a post! Body is %d bytes long\n", len(body))
 	}))
 
-	// curl -v -X POST "http://localhost:8000/create" -d "name=Joe&last_name=Mama"
 	s.Post("/create", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		err := r.ParseForm()
 		if err != nil {

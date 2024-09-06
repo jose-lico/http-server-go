@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -9,6 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+)
+
+const (
+	MaxHeadersSize = 1024
+	MaxRequestSize = 1024 * 2
 )
 
 type Handler interface {
@@ -149,113 +155,204 @@ func (s *Server) match(method, path string) (http.Handler, map[string]string, bo
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	// If the request is to large, return 413 TODO: Find better way to handle this
-	req := make([]byte, 1024)
-	n, err := conn.Read(req)
-	if err != nil {
-		fmt.Println("Error reading from connection:", err)
-		conn.Write([]byte("HTTP/1.1 413 Payload Too Large\r\n\r\n"))
-		return
-	}
+	for {
+		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
-	reqStr := string(req[:n])
-	if reqStr == "" {
-		return
-	}
+		buffer := make([]byte, 1024)
+		var req []byte
+		var headersEnd int
 
-	// Split Request Line and Headers from Body
-	reqSlice := strings.Split(reqStr, "\r\n\r\n")
-	// Split Request Line from Headers
-	reqLineAndHeaders := strings.Split(reqSlice[0], "\r\n")
-	// Split Method, URI and Version
-	reqLine := strings.Split(reqLineAndHeaders[0], " ")
+		for {
+			n, err := conn.Read(buffer)
 
-	protocol := reqLine[2]
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
 
-	// Only support protocol version HTTP/1.1, return 505 otherwise
-	if protocol != "HTTP/1.1" {
-		conn.Write([]byte("HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n"))
-		return
-	}
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					fmt.Printf("Connection from %s timed out\n", conn.RemoteAddr().String())
+					return
+				}
 
-	method := reqLine[0]
-	uri, err := url.Parse(reqLine[1])
+				fmt.Println("Error reading from connection:", err)
+				conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n"))
+				return
+			}
 
-	if err != nil {
-		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		return
-	}
+			req = append(req, buffer[:n]...)
 
-	handler, wildcards, found, correctMethod := s.match(method, uri.Path)
+			if len(req) > MaxHeadersSize {
+				conn.Write([]byte("HTTP/1.1 431 Request Header Fields Too Large\r\n\r\n"))
+				if tcpConn, ok := conn.(*net.TCPConn); ok {
+					tcpConn.CloseWrite()
+				}
+				return
+			}
 
-	if !found {
-		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
-		return
-	}
-
-	if !correctMethod {
-		conn.Write([]byte("HTTP/1.1 405 Method Not Allowed\r\n\r\n"))
-		return
-	}
-
-	var body io.Reader
-	if len(reqSlice) > 1 {
-		body = strings.NewReader(reqSlice[1])
-	}
-	request, err := http.NewRequest(method, uri.Path, body)
-
-	for wildcard, value := range wildcards {
-		request.SetPathValue(wildcard, value)
-	}
-
-	if err != nil {
-		conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n"))
-		return
-	}
-
-	request.URL = uri
-
-	for i := 1; i < len(reqLineAndHeaders); i++ {
-		header := strings.SplitN(reqLineAndHeaders[i], ":", 2)
-		if len(header) != 2 {
-			continue
+			headersEnd = bytes.Index(req, []byte("\r\n\r\n"))
+			if headersEnd != -1 {
+				break
+			}
 		}
-		key := strings.TrimSpace(header[0])
-		values := strings.Split(strings.TrimSpace(header[1]), ", ")
-		for _, value := range values {
-			request.Header.Add(key, strings.TrimSpace(value))
+
+		reqStr := string(req)
+
+		// Split Request Line and Headers from Body
+		reqSlice := strings.Split(reqStr, "\r\n\r\n")
+		// Split Request Line from Headers
+		reqLineAndHeaders := strings.Split(reqSlice[0], "\r\n")
+		// Split Method, URI and Version
+		reqLine := strings.Split(reqLineAndHeaders[0], " ")
+
+		protocol := reqLine[2]
+
+		if protocol != "HTTP/1.1" {
+			conn.Write([]byte("HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n"))
+			return
+		}
+
+		method := reqLine[0]
+		uri, err := url.Parse(reqLine[1])
+
+		if err != nil {
+			conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+			return
+		}
+
+		handler, wildcards, found, correctMethod := s.match(method, uri.Path)
+
+		if !found {
+			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+			return
+		}
+
+		if !correctMethod {
+			conn.Write([]byte("HTTP/1.1 405 Method Not Allowed\r\n\r\n"))
+			return
+		}
+
+		headers := http.Header{}
+
+		for i := 1; i < len(reqLineAndHeaders); i++ {
+			header := strings.SplitN(reqLineAndHeaders[i], ":", 2)
+			if len(header) != 2 {
+				continue
+			}
+			key := strings.TrimSpace(header[0])
+			values := strings.Split(strings.TrimSpace(header[1]), ", ")
+			for _, value := range values {
+				headers.Add(key, strings.TrimSpace(value))
+			}
+		}
+
+		var contentLength int
+
+		if _, exists := headers["Content-Length"]; exists {
+			contentLengthStr := headers.Get("Content-Length")
+			contentLength, err = strconv.Atoi(contentLengthStr)
+			if err != nil {
+				conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+				return
+			}
+		}
+
+		bodyReadSoFar := len(reqSlice[1])
+		remainingBodyLength := contentLength - bodyReadSoFar
+
+		if contentLength > 0 {
+			if len(req)+remainingBodyLength > MaxRequestSize {
+				conn.Write([]byte("HTTP/1.1 413 Payload Too Large\r\n\r\n"))
+				if tcpConn, ok := conn.(*net.TCPConn); ok {
+					tcpConn.CloseWrite()
+				}
+				return
+			}
+
+			for remainingBodyLength > 0 {
+				n, err := conn.Read(buffer)
+
+				if err != nil {
+					if err == io.EOF {
+						return
+					}
+
+					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+						fmt.Printf("Connection from %s timed out\n", conn.RemoteAddr().String())
+						return
+					}
+
+					fmt.Println("Error reading from connection:", err)
+					conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n"))
+					return
+				}
+
+				reqSlice[1] += string(buffer[:n])
+				remainingBodyLength -= n
+
+				if len(req)+n > MaxRequestSize {
+					conn.Write([]byte("HTTP/1.1 413 Payload Too Large\r\n\r\n"))
+					if tcpConn, ok := conn.(*net.TCPConn); ok {
+						tcpConn.CloseWrite()
+					}
+					return
+				}
+			}
+		}
+
+		var body io.Reader
+		if len(reqSlice) > 1 {
+			body = strings.NewReader(reqSlice[1])
+		}
+		request, err := http.NewRequest(method, uri.Path, body)
+
+		for wildcard, value := range wildcards {
+			request.SetPathValue(wildcard, value)
+		}
+
+		if err != nil {
+			conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n"))
+			return
+		}
+
+		request.URL = uri
+		request.Header = headers
+
+		writer := NewWriter()
+
+		if request.Header.Get("Connection") == "keep-alive" {
+			writer.Header().Set("Connection", "keep-alive")
+			writer.Header().Set("Keep-Alive", "timeout=5, max=100")
+		} else {
+			writer.Header().Set("Connection", "close")
+		}
+
+		handler.ServeHTTP(writer, request)
+
+		if writer.status == 0 {
+			writer.status = http.StatusOK
+		}
+
+		if writer.Header().Get("Content-Type") == "" {
+			writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		}
+
+		writer.Header().Set("Content-Length", strconv.Itoa(writer.body.Len()))
+
+		writer.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
+
+		var headerStr string
+
+		for key, values := range writer.Header() {
+			for _, value := range values {
+				headerStr = headerStr + fmt.Sprintf("%s: %s\r\n", key, value)
+			}
+		}
+
+		conn.Write([]byte(fmt.Sprintf("%s %d %s\r\n%s\r\n%s", protocol, writer.status, http.StatusText(writer.status), headerStr, writer.body.String())))
+
+		if writer.Header().Get("Connection") != "keep-alive" {
+			return
 		}
 	}
-
-	writer := NewWriter()
-	handler.ServeHTTP(writer, request)
-
-	// Set Status if not set
-	if writer.status == 0 {
-		writer.status = http.StatusOK
-	}
-
-	// Set Content-Type if not set
-	if writer.Header().Get("Content-Type") == "" {
-		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	}
-
-	// Set Content-Length
-	writer.Header().Set("Content-Length", strconv.Itoa(writer.body.Len()))
-
-	// Set Date
-	writer.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
-
-	// Set Connection, for now always close
-	writer.Header().Set("Connection", "close")
-
-	var headerStr string
-
-	for key, values := range writer.Header() {
-		for _, value := range values {
-			headerStr = headerStr + fmt.Sprintf("%s: %s\r\n", key, value)
-		}
-	}
-
-	conn.Write([]byte(fmt.Sprintf("%s %d %s\r\n%s\r\n%s", protocol, writer.status, http.StatusText(writer.status), headerStr, writer.body.String())))
 }
