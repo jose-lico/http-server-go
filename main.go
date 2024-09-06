@@ -29,6 +29,8 @@ import (
 // curl -v -X POST "http://localhost:8000"
 // curl -v -X POST "http://localhost:8000/create" -d "name=Joe&last_name=Mama"
 
+// To test keep-alive connections use Postman
+
 func main() {
 	s := server.NewServer()
 
