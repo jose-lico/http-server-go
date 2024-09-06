@@ -81,6 +81,10 @@ func (s *Server) addRoute(method, pattern string, handler http.Handler) {
 			continue
 		}
 
+		if len(route.Wildcards) != len(wildcards) {
+			continue
+		}
+
 		match := true
 
 		for i, part := range route.Pattern {
@@ -121,16 +125,14 @@ func (s *Server) match(method, path string) (http.Handler, map[string]string, bo
 		// Check pattern
 		for i, part := range route.Pattern {
 			if part == "" {
-				// temp fix for index route edge case
-				if len(route.Wildcards) == 0 {
-					if part != parts[i] {
+				if parts[i] != "" {
+					if len(route.Wildcards) != 0 {
+						wildcards[route.Wildcards[len(wildcards)]] = parts[i]
+					} else {
 						match = false
+						break
 					}
-
-					break
 				}
-
-				wildcards[route.Wildcards[len(wildcards)]] = parts[i]
 			} else if part != parts[i] {
 				match = false
 				break

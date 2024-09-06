@@ -13,7 +13,7 @@ import (
 // Error states
 
 // Send a large header to trigger a `431 Request Header Fields Too Large` status
-// curl -v http://localhost:8000/ -H "X-Large-Header: $(head -c 1500 </dev/urandom | base64)" -d "This is a test body"
+// curl -v "http://localhost:8000/" -H "X-Large-Header: $(head -c 1500 </dev/urandom | base64)" -d "This is a test body"
 
 // Send a large body to trigger a `413 Payload Too Large` status
 // curl -v --data-binary "$(head -c 3000 </dev/urandom | base64)" "http://localhost:8000"
@@ -22,6 +22,7 @@ import (
 
 // curl -v "http://localhost:8000"
 // curl -v "http://localhost:8000/?name=Joe&pets=Turtle&pets=Dog"
+// curl -v "http://localhost:8000/hey"
 // curl -v "http://localhost:8000/echo/ligma"
 // curl -v "http://localhost:8000/echo/Hello/reverse/World"
 // curl -v "http://localhost:8000/123"
@@ -40,6 +41,10 @@ func main() {
 		}
 
 		fmt.Fprintln(w, "Hello world!")
+	}))
+
+	s.Get("/hey", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "Hey world!")
 	}))
 
 	s.Get("/echo/{echo}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,20 +68,16 @@ func main() {
 		fmt.Fprintln(w, echo, echo2)
 	}))
 
-	// s.Get("/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	// 	id := r.PathValue("id")
+	s.Get("/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
 
-	// 	fmt.Println(id)
-
-	// 	if id == "123" {
-	// 		fmt.Fprintln(w, "User Found!")
-	// 	} else {
-	// 		w.WriteHeader(http.StatusNotFound)
-	// 		fmt.Fprintln(w, "User Not Found!")
-	// 	}
-	// }))
-
-	// Same route, different method
+		if id == "123" {
+			fmt.Fprintln(w, "User Found!")
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprintln(w, "User Not Found!")
+		}
+	}))
 
 	s.Post("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
